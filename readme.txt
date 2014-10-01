@@ -1,5 +1,5 @@
 === AIIRS Artificial Intelligence Image Resizer  ===
-Contributors: varunms,karthikskr
+Contributors: varunms, karthikskr
 Author URI: http://varunsridharan.in/
 Plugin URL: https://wordpress.org/plugins/aiirs-artificial-intelligence-image-resizer/
 Donate link: http://varunsridharan.in/
