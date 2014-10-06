@@ -20,7 +20,7 @@ Add image size to crop image dynamically with using code & Remap Image Size.
 <h4>Plugin Feature List</h4>
 
 * Add Image size dynamically 
-* Select Image Size Configured In Medial Uploader
+* Select Image Size Configured In Media Uploader
 * Remap Image Size.
 
 Eg : if you have called `post-thumbnail` size for most of the images. and if you want to add your own image size `custom-post-thumbnail`. 
