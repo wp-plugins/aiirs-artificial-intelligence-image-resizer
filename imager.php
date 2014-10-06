@@ -17,138 +17,343 @@
     Plugin Name: AIIRS Artificial Intelligence Image Resizer
     Plugin URI: http://varunsridharan.in/
     Description: Add image size to crop image dynamically  with using code
-    Version: 0.1
+    Version: 0.2
     Author: Varun Sridharan
     Author URI: http://varunsridharan.in/
     License: GPL2
 
 */
 defined('ABSPATH') or die("No script kiddies please!");
-$aiirs_plug_url = plugins_url('',__FILE__).'/';
-$aiirs_path = plugin_dir_path( __FILE__ );
-if ( is_admin() ){ 
-    add_action('admin_menu', 'aiirs_add_menu');
-	function aiirs_add_menu() {
-		add_options_page('AIIRS Settings', 'AIIRS Settings', 'administrator','aiirs-page', 'aiirs_page');
- 		add_option("aiirs_settings", '', '', 'yes');
+define('aiirs_url',plugins_url('',__FILE__).'/');
+define('aiirs_path',plugin_dir_path( __FILE__ ));
+
+
+class Artificial_Intelligence_Image_Resizer{
+
+	public $aiirs_v;
+	public $ex_values;
+	private $imageSize;
+	private $imageMap;
+	public $remap_image;
+	
+	/**
+	 * Base Class Setup
+	 * @since 0.1
+	 * @access public
+	 */
+	public function __construct() {
+		$this->aiirs_v = '0.2';
+		register_activation_hook( __FILE__, array($this ,'_activate') ); 
+		$this->SaveData();
+		$this->get_existing_value();
+		$this->add_new_image_size();
+		$this->reamp_array_ready();
+		
+		add_filter('post_thumbnail_size',array($this,'map_image_size'));
+		add_filter( 'image_size_names_choose', array($this,'add_size_media_uploader') );
+		add_filter( 'init', array($this,'get_image_sizes') );
+		if(is_admin()){
+			add_action('admin_menu', array($this,'add_menu'));
+		}
+	}	
+	
+	/**
+	 * Plugin Activation Function
+	 * @since 0.1
+	 * @access public
+	 */
+	public function _activate(){
+		$value = '';
+		if(get_option('aiirs_settings')){
+			$value = get_option('aiirs_settings');
+			delete_option('aiirs_settings');
+		}
+		add_option("aiirs_image_size", $value, '', 'yes');
+		add_option("aiirs_size_map", '', '', 'yes');
+		
 	}
-    if(isset($_POST['aiirs_update'])) {update_option( 'aiirs_settings', json_encode($_POST['aiirs']) );}
-    $aiirs_values = json_decode(get_option('aiirs_settings'),true);
+	
+	/**
+	 * Add Link Under Settings Menu
+	 * @since 0.1
+	 * @access public
+	 */
+	public function add_menu(){
+		$page1 = add_menu_page('AiirS', 'AiirS', 'administrator','aiirs-page',array($this,'aiirs_page'), '');
+		add_submenu_page( 'aiirs-page', 'Add Image Size', 'Add Image Size', 'administrator', 'aiirs-page', array($this,'aiirs_page') );
+		$page2 = add_submenu_page( 'aiirs-page', 'Map Image Size', 'Map Image Size', 'administrator', 'aiirs-map-sizepage',array($this,'aiirs_map_sizepage') );
 
-    if($aiirs_values){
-        $aiirs_trans = array_values($aiirs_values);
-        foreach($aiirs_trans as $aiirs_k => $aiirs_tra){
-            if(isset($aiirs_tra['img_crop'])){$check = true;}
-            else {$check=false;}
-            add_image_size( $aiirs_tra['size_name'], $aiirs_tra['img_width'], $aiirs_tra['img_height'], $check ); 
-        }
+		# Register Style & Script
+		$this->register_script_style();
+		add_action( 'admin_print_styles-' . $page1, array($this,'enqueue_script_style') ); 
+		add_action( 'admin_print_styles-' . $page2, array($this,'enqueue_script_style') );
+	}
+	
 
-    }    
 
- 
-    function display_custom_image_sizes( $sizes ) {
-        global $_wp_additional_image_sizes;
-        if ( empty($_wp_additional_image_sizes) )
-        return $sizes;
+	/**
+	 * Register All Needed Scripts & Styles
+	 * @since 0.1
+	 * @access public
+	 */
+	public function register_script_style(){
+		wp_register_script('aiirs_script',aiirs_url.'js/script.js', array( 'jquery' ), $this->aiirs_v, false );
+		wp_register_style ('aiirs_style', aiirs_url.'css/style.css', false,$this->aiirs_v, 'all' );
+	}
+	
+	/**
+	 * Enqueue All Needed Scripts
+	 * @since 0.1
+	 * @access public
+	 */
+	public function enqueue_script_style() {
+		wp_enqueue_script( 'aiirs_script' );
+		wp_enqueue_style( 'aiirs_style' );
+	}
 
-        foreach ( $_wp_additional_image_sizes as $id => $data ) {
-        if ( !isset($sizes[$id]) )
-          $sizes[$id] = ucfirst( str_replace( '-', ' ', $id ) );
-        }
+	/**
+	 * Save Plugin Data
+	 * @since 0.1
+	 * @access public
+	 */	
+	private function SaveData(){ 
+		if(isset($_POST['aiirs_update'])) {
+			$image = $_POST['aiirs'];
+			foreach($image as $key => $img){
+				if(empty($img['size_name'])){
+					unset($image[$key]);
+				}
+			} 
+			update_option( 'aiirs_image_size', json_encode(array_values($image)) );
+		}	
 
-        return $sizes;
-    } 
-   add_filter( 'image_size_names_choose', 'display_custom_image_sizes' );  
-  
-    
-}
- 
+		if(isset($_POST['aiirs_update_image_map'])){
+			$image = $_POST['aiirs_mapimagep'];
+			foreach($image as $key => $img){
+				if(empty($img['key'])){
+					unset($image[$key]);
+				}
+			} 
+			update_option( 'aiirs_size_map', json_encode(array_values($image)) );
+		}
+	}
+	
+	/**
+	 * Get Existing Database Values
+	 * @return Array [$this->ex_values,$this->imageMap]
+	 * @since 0.1
+	 * @access public
+	 */
+	private function get_existing_value() {
+		$values = json_decode(get_option('aiirs_image_size'),true);
+		$values2 = json_decode(get_option('aiirs_size_map'),true);
+		
+		if(isset($values) && ! empty($values)){ $this->ex_values = $values; } 
+		else { $this->ex_values = array(); }
 
-function aiirs_page(){
-    global $aiirs_plug_url,$aiirs_values;
-    $aiirs_total = 0;
-   
-    $aiirs_total = count($aiirs_total);
-    $aiirs_layout = '';
-
-if($aiirs_values){
-     $aiirs_trans = array_values($aiirs_values);
-foreach($aiirs_trans as $aiirs_k => $aiirs_tra){
-    if(isset($aiirs_tra['img_crop'])){$check = 'checked';}
-    else {$check="";}
-	$aiirs_layout .= '
-            <tr id="aiirs['.$aiirs_k.']">    
-                <td><input type="text" name="aiirs['.$aiirs_k.'][size_name]" value="'.$aiirs_tra['size_name'].'" class="regular-text" /> </td>
-                <td><input type="text" name="aiirs['.$aiirs_k.'][img_width]" value="'.$aiirs_tra['img_width'].'" class="regular-text" /> </td>
-                <td><input type="text" name="aiirs['.$aiirs_k.'][img_height]" value="'.$aiirs_tra['img_height'].'" class="regular-text" /> </td>
-                <td><label><input name="aiirs['.$aiirs_k.'][img_crop]" id="aiirs['.$aiirs_k.'][img_crop]" type="checkbox" class="ios-switch" '.$check.' /> </label></td>
-                <td>
-                    <input  id="deleteCurrent" data-id="aiirs['.$aiirs_k.']"  class="button hidden button-secondary" type="button" value="-" name="deleteCurrent">
-                    <input onclick="addMore();"  id="addmore" class="button button-secondary" type="button" value="+" name="addmore">
+		if(isset($values2) && ! empty($values2)){ $this->imageMap = $values2; } 
+		else { $this->imageMap = array(); }
+	}
+	
+	/**
+	 * Add Image Sizes To WP
+	 * @since 0.1
+	 * @access public 
+	 */
+	private function add_new_image_size(){
+		$aiirs_trans = array_values($this->ex_values);
+		foreach($aiirs_trans as $aiirs_k => $aiirs_tra){
+			if(isset($aiirs_tra['img_crop'])){
+				$check = true;
+			} else {
+				$check=false;
+			} 
+			$this->add_size(@$aiirs_tra['size_name'], @$aiirs_tra['img_width'], @$aiirs_tra['img_height'], @$check);
+		}		
+	}
+	
+	/**
+	 * Adds Image Size To WordPress
+	 * @param string $name name of the image size
+	 * @param int $width size of the image in px
+	 * @param int $height size of the image in px
+	 * @param boolean $check
+	 * @since 0.1
+	 * @access private
+	 */
+	private function add_size($name,$width,$height,$check){
+		add_image_size($name,$width,$height,$check);
+	}
+	
+	
+	/**
+	 * Generate Re-Map Image Array
+	 * @since 0.2
+	 * @return array [$this->remap_image]
+	 * @access private 
+	 */
+	private function reamp_array_ready(){
+		$temp_array = array();
+		foreach($this->imageMap as $value){
+			$temp_array[$value['key']] = $value['val'];
+		}
+		$this->remap_image = $temp_array; 
+	}
+	
+	/**
+	 * Re-Map Image Size If called image size exist in remap_image array
+	 * @param string $size called image size
+	 * @return string new image size
+	 * @since 0.2
+	 * @access public
+	 */	
+	public function map_image_size($size){ 
+		if(isset($this->remap_image[$size])){
+			return $this->remap_image[$size];
+		}
+		return $size;		
+	}
+	
+	/**
+	 * Adds Custom Sizes In Media Uploader / Media Selector Box
+	 * @return array sizes
+	 * @since 0.1
+	 */	
+	public function add_size_media_uploader($sizes){
+		global $_wp_additional_image_sizes;
+		if ( empty($_wp_additional_image_sizes) )
+			return $sizes;
+		
+		foreach ( $_wp_additional_image_sizes as $id => $data ) {
+			if ( !isset($sizes[$id]) )
+				$sizes[$id] = ucfirst( str_replace( '-', ' ', $id ) );
+		}
+		
+		return $sizes;		
+	}
+	
+	/**
+	 * Get All Registed Image Size
+	 * @return array [$this->imageSize]
+	 * @since 0.1
+	 * @access public
+	 */
+	public function get_image_sizes(){
+		$imgsize = get_intermediate_image_sizes();
+		$sizes = array();
+		$searchReplace = array('-','_','/','&');
+		foreach ( $imgsize as $id => $data ) {
+			if ( !isset($sizes[$id]) )
+				$sizes[$data] = ucfirst( str_replace($searchReplace,' ',$data ));
+		}
+		$this->imageSize =  $sizes;
+	}
+	
+	/**
+	 * Add Image Size Page Layout
+	 * @since 0.1
+	 * @access public
+	 */
+	public function aiirs_page(){
+		$pageTitle = 'Artificial Intelligence Image Resizer [Aiirs]';
+		require(aiirs_path.'inc/header.php');
+		require(aiirs_path.'inc/aiirs_page.php');
+		require(aiirs_path.'inc/footer.php');
+	}
+	
+	/**
+	 * Re-Map Image Size Page
+	 * @since 0.2
+	 * @access public
+	 */	
+	public function aiirs_map_sizepage(){ 
+		$pageTitle = 'Artificial Intelligence Image Size Mapper';
+		require(aiirs_path.'inc/header.php');
+		require(aiirs_path.'inc/aiirs_map_page.php');
+		require(aiirs_path.'inc/footer.php');
+	}
+	
+	/**
+	 * Table Tr Layout for add image size page
+	 * @param number $key
+	 * @param string $name
+	 * @param string $width
+	 * @param string $height
+	 * @param string $crop
+	 * @return html tr
+	 * @since 0.2
+	 * @access private
+	 */
+	private function table_trLayout($key = 0,$name = '',$width = '',$height = '',$crop = ''){
+		return '<tr id="'.$key.'">
+                <td><input type="text" name="aiirs['.$key.'][size_name]" value="'.$name.'" class="regular-text" /> </td>
+                <td><input type="text" name="aiirs['.$key.'][img_width]" value="'.$width.'" class="minBox regular-text" /> </td>
+                <td><input type="text" name="aiirs['.$key.'][img_height]" value="'.$height.'" class="minBox regular-text" /> </td>
+                <td class="checkbox" ><label><input name="aiirs['.$key.'][img_crop]" type="checkbox" class="ios-switch" '.$crop.' /> </label></td>
+                <td class="action_button" >
+                    <input data-id="'.$key.'"  class="delete button button-secondary" type="button" value="-"/>
+                    <input data-id="'.$key.'"  class="addmore button button-primary" type="button" value="+"/>
                 </td>
-            </tr> ';	
+            </tr>';
+		
+	}
+
+	/**
+	 * Table Tr Layout for Re-Map image page
+	 * @param number $id
+	 * @param string $kselected
+	 * @param string $vselected
+	 * @return string
+	 * @since 0.2
+	 * @access private
+	 */
+	private function image_map_layout($id=0,$kselected='',$vselected=''){
+		$layout = '<tr id="'.$id.'">';
+			$layout .= '<td>';
+				$layout .= '<select name="aiirs_mapimagep['.$id.'][key]" >';
+					$layout .= $this->gen_selBox($kselected);
+				$layout .= '</select>';
+			$layout .= '</td>';
+			
+			$layout .= '<td>';
+				$layout .= '<==>';
+			$layout .= '</td>';
+			
+			$layout .= '<td>';  
+				$layout .= '<select name="aiirs_mapimagep['.$id.'][val]" >';
+					$layout .= $this->gen_selBox($vselected);
+				$layout .= '</select>';
+			$layout .= '</td>';
+			
+			$layout .= '<td class="action_button" >';
+				$layout .= '<input class="delete button button-secondary" type="button" value="-"/>';
+				$layout .= '<input class="addmore button button-primary" type="button" value="+"/>';
+			$layout .= '</td>';
+		$layout .= '</tr>';
+		return $layout; 	
+	}
+	
+	/**
+	 * Select Box Generator For Re-Map Image Size
+	 * @param string $selected
+	 * @return string
+	 * @since 0.2
+	 * @access private
+	 */
+	private function gen_selBox($selected =''){
+		$selc = '';
+		if(! $selected){ $selc  = 'selected'; }
+		$layout  = '<option value="">Select Any One</option>'; 
+		foreach($this->imageSize as $key => $val){
+			$select = '';
+			if($key == $selected){
+				$select = 'selected';
+			}			
+			$layout .= '<option value="'.$key.'" '.$select.'>'.$val.'</option>';
+		}
+		return $layout;		
+	}
 }
 
-} else  {
-$aiirs_layout .= '
-            <tr id="aiirs[0]">    
-                <td><input type="text" name="aiirs[0][size_name]" class="regular-text" /> </td>
-                <td><input type="text" name="aiirs[0][img_width]" class="regular-text" /> </td>
-                <td><input type="text" name="aiirs[0][img_height]" class="regular-text" /> </td>
-                <td><label><input name="aiirs[0][img_crop]" id="aiirs[0][img_crop]" type="checkbox" class="ios-switch" /> </label></td>
-                <td>
-                    <input  id="deleteCurrent" data-id="aiirs[0]"  class="button hidden button-secondary" type="button" value="-" name="deleteCurrent">
-                    <input onclick="addMore();"  id="addmore" class="button button-secondary" type="button" value="+" name="addmore">
-                </td>
-            </tr>
-';		
-}
-         
-?>
-
-
- 
-<script>
-var current = <?php echo $aiirs_total; ?>;
-</script>
-
-<script src="<?php echo $aiirs_plug_url; ?>script.js"></script>
-<link href="<?php echo $aiirs_plug_url; ?>style.css" rel="stylesheet"/>
-<div class="wrap">
- 
-	<h2>Artificial Intelligence Image Resizer [AIIRS]</h2>
-    <hr/>
-    <form method="post">
-    <table id="translations" class="tab form-table">
-        <tbody> 
-            
-            <tr valign="top">
-                <th class="titledesc" scope="row">Size Name</th>
-                <th class="titledesc" scope="row">Width</th>
-                <th class="titledesc" scope="row">Height</th>
-                <th class="titledesc" scope="row">Crop Type *</th>
-                <th class="titledesc" scope="row">Options</th>
-            </tr>
-             
-          <?php echo $aiirs_layout; ?>
-           
-             
-            <tr >
-                <td class="titledesc" scope="row"> 
-                    <input style="display:none;" id="addmore" onclick="addMore();" class="button button-secondary" type="button" value="Add More" name="addmore">
-                     <input id="aiirs_update" class="button button-primary" type="submit" value="Save Size's" name="aiirs_update">
-                </td>
-         
-            </tr>
-
-        </tbody>
-    </table>
-        <p>* Whether to crop images to specified height and width or resize <a title="http://www.davidtan.org/wordpress-hard-crop-vs-soft-crop-difference-comparison-example/" class="external text" href="http://www.davidtan.org/wordpress-hard-crop-vs-soft-crop-difference-comparison-example/">Difference between soft and hard crop</p>
-    </form>
-</div>
-
-
-
-<?php
-}
+$Artificial_Intelligence_Image_Resizer = new Artificial_Intelligence_Image_Resizer;
 ?>

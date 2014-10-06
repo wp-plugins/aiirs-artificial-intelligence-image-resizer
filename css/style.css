@@ -1,3 +1,20 @@
+.minBox{
+	width:180px !important;
+}
+th.titledesc, td.action_button, td.checkbox {
+    text-align: center !important; 
+}
+
+label {
+    text-align: left !important; 
+}
+
+table.details{margin:10px 0!important;width:100%;font-family:verdana,arial,sans-serif;font-size:13px;color:#333;border-width:1px;border-color:#666;border-collapse:collapse}
+table.tab-table tr th{text-align:left}
+table.details tr th{border-width:1px;padding:8px;border-style:solid;border-color:#666;background-color:#dedede}
+table.details tr td{border-width:1px;padding:8px;border-style:solid;border-color:#666;background-color:#fff}
+table.details{text-align:center;}
+
 
 
 /**
@@ -8,6 +25,7 @@
 :root input[type="checkbox"] { /* :root here acting as a filter for older browsers */
 	position: absolute;
 	opacity: 0;
+	text-align: left !important;
 }
 
 :root input[type="checkbox"].ios-switch + div {
